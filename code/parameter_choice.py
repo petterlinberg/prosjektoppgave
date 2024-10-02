@@ -68,7 +68,7 @@ class MakeSignal:
         u[int(0.25*self.gridsize):-int(0.25*self.gridsize)] = 1
         return u
 
-    def add_noise(self, signal, noise_level=0.1):
+    def add_noise(self, signal, noise_level=1e-3):
         """
         Add Gaussian noise to a signal.
 

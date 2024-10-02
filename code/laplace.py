@@ -9,13 +9,13 @@ from parameter_choice import MakeSignal, ParameterChoice
 
 class InverseLaplaceSolver1D(MakeSignal):
 
-    def __init__(self, grid_size):
+    def __init__(self, grid_size, alpha):
         super(InverseLaplaceSolver1D, self).__init__(grid_size)
         self.grid_size = grid_size
         self.L = self.CreateLaplaceMatrix(grid_size)
         self.alphas = np.logspace(-7, 0, 30)
-        self.noisy_u = self.add_noise(self.get_true_u(self.x), noise_level=0.1)
-
+        self.noisy_u = self.add_noise(self.get_true_u(self.x), noise_level=0)
+        self.alpha = alpha
 
     
     def CreateLaplaceMatrix(self, grid_size):
@@ -37,9 +37,9 @@ class InverseLaplaceSolver1D(MakeSignal):
         U, s, VT = svd(L, full_matrices=False)
 
         f0 = np.zeros(grid_size)
-        f0[0], f0[-1] = -3, +3
+        f0[0], f0[-1] = -3, 3
 
-        v = np.linalg.solve(L.T, self.noisy_u - f0)
+        v = np.linalg.solve(L.T, self.noisy_u)
         
         f = np.linalg.solve(alpha*I+U@np.diag(1/s**2)@U.T, v)
         return f, np.linalg.solve(L, f)
@@ -96,28 +96,34 @@ class InverseLaplaceSolver1D(MakeSignal):
         plt.legend()
         plt.show()
 
-    def plot_l_curve(self, residual_norms, solution_norms, curvature=None):
-        alphas = self.alphas
+    def compute_residual_and_solution_norm(self, alpha):
         """
-        Plot the L-curve and optionally highlight the maximum curvature point.
+        Compute the residual norm ||f - k * u|| and the solution norm ||u|| for the L-curve.
         
-        :param residual_norms: List of residual norms.
-        :param solution_norms: List of solution norms.
-        :param lambdas: List of regularization parameters.
-        :param curvature: List of curvatures (optional, for highlighting maximum curvature point).
+        :param f: The observed signal (after convolution with noise).
+        :param u: The recovered signal.
+        :param signal_length: Length of the original signal.
+        :param regularization_param: Regularization parameter (lambda).
+        :return: Tuple of residual norm and solution norm.
         """
-        plt.figure(figsize=(10, 6))
-        plt.loglog(residual_norms, solution_norms, marker='o')
-        for i, alpha in enumerate(alphas):
-            plt.text(residual_norms[i], solution_norms[i], f'{alpha:.1e}')
-        plt.xlabel('Residual norm $||L^{-1}f - u||$')
-        plt.ylabel('Solution norm ||f||')
-        plt.title('L-curve for Tikhonov regularization')
-        plt.grid(True)
+        f_recovered , u_recovered= self.tikhonov_regularization(alpha)
+        # Compute the residual ||f - k * u||
+        residual = u_recovered - self.noisy_u
+        residual_norm = np.linalg.norm(residual)
+    
+        # Compute the solution norm ||u||
+        solution_norm = np.linalg.norm(u_recovered)
+    
+        return residual_norm, solution_norm
+
+    def l_curve(self):
+        alphas = self.alphas        
+        residual_norms = []
+        solution_norms = []
         
-        if curvature is not None:
-            max_curvature_idx = np.argmax(curvature)
-            plt.scatter([residual_norms[max_curvature_idx]], [solution_norms[max_curvature_idx]], color='red', label='Max curvature')
-            plt.legend()
+        for alpha in alphas:
+            residual_norm, solution_norm = self.compute_residual_and_solution_norm(alpha)
+            residual_norms.append(residual_norm)
+            solution_norms.append(solution_norm)
         
-        plt.show()
+        return residual_norms, solution_norms

@@ -9,7 +9,7 @@ from parameter_choice import MakeSignal, ParameterChoice
 
 
 class KernelSolver1D(MakeSignal):
-    def __init__(self, grid_size, sigma=1.0, regularization_param=0.1):
+    def __init__(self, grid_size, sigma, alpha):
         super(KernelSolver1D, self).__init__(grid_size)
         """
         Initialize the KernelSolver1D with given parameters.
@@ -18,20 +18,20 @@ class KernelSolver1D(MakeSignal):
         :param regularization_param: The regularization parameter (lambda) for Tikhonov regularization.
         """
         self.grid_size = grid_size
-        self.u_noisy = self.add_noise(self.get_true_u_k(), noise_level=0.1)
+        self.u_noisy = self.add_noise(self.get_true_u_k(), noise_level=1e-3)
         self.sigma = sigma
-        self.regularization_param = regularization_param
-        self.alphas = np.logspace(-5, 2, 30)
+        self.alpha = alpha
+        self.alphas = np.logspace(-7, -2, 30)
         self.u_k = self.get_true_u_k()
+        self.f_noisy = self.add_noise(self.convolve(self.u_k, self.sigma), 1e-3)
 
     
-    def kernel_matrix(self, size):
-        x = np.arange(size)
-        gaussian = np.exp(-0.5 * (x - size // 2) ** 2 / self.sigma ** 2)
-        gaussian = gaussian / np.sum(gaussian)  # Normalize the kernel
+    def kernel_matrix(self, sigma):
+        gaussian = np.exp(-0.5 * (self.x) ** 2 / sigma ** 2)
+        gaussian = gaussian / np.sum( np.exp(-0.5 * (self.x - 0.5) ** 2 / sigma ** 2)) # normalize kernel
         return toeplitz(gaussian)
             
-    def convolve(self, signal):
+    def convolve(self, signal, sigma):
         
         
         N = len(signal)
@@ -39,23 +39,21 @@ class KernelSolver1D(MakeSignal):
         
         expanded_signal = np.pad(signal, N, mode = 'constant', constant_values = 0)
         expanded_x = np.linspace(-1,2, N*3)
-        K = self.kernel_matrix(self.grid_size)
-        g =  self.u_k @ K
+        
+        K = self.kernel_matrix(sigma)
+        g =  K @ signal
         return g
     
     
 
-    def tikhonov_deconvolution(self, f, alpha):
+    def tikhonov_deconvolution(self, f, alpha, sigma):
 
         
-        expanded_x = np.linspace(-1,2, self.grid_size*3)
-
-        expanded_signal = np.concatenate([f-6, f, f +6])
-        K = self.kernel_matrix(expanded_x)
+        K = self.kernel_matrix(sigma)
         U, s, VT = svd(K)
-
+        u_recovered = VT.T@np.diag(s/(s**2+alpha))@U.T@f
         
-        return (VT.T@np.diag(s/(s**2+alpha))@U.T@expanded_signal)[self.grid_size:-self.grid_size]
+        return u_recovered
 
 
     
@@ -76,10 +74,10 @@ class KernelSolver1D(MakeSignal):
         :param regularization_param: Regularization parameter (lambda).
         :return: Tuple of residual norm and solution norm.
         """
-        u_recovered = self.tikhonov_deconvolution(f, alpha)
+        u_recovered = self.tikhonov_deconvolution(self.f_noisy, alpha, self.sigma)
         
         # Compute the residual ||f - k * u||
-        residual = self.get_true_u(self.x) - self.convolve(u_recovered)
+        residual = self.f_noisy - self.convolve(u_recovered, self.sigma)
         residual_norm = np.linalg.norm(residual)
         
         # Compute the solution norm ||u||
@@ -143,45 +141,4 @@ class KernelSolver1D(MakeSignal):
         
         return optimal_lambda, residual_norms, solution_norms, curvature
 
-    def plot_results(self, title = None):
-        """
-        Plot the original, noisy, blurred, and recovered signals.
-        
-        :param x: The x values (spatial or time domain).
-        :param u_true: The true signal.
-        :param u_noisy: The noisy signal.
-        :param f: The blurred (convolved) signal.
-        :param u_recovered: The recovered signal after deconvolution.
-        """
-        x = self.x
-        #u_recovered = self.tikhonov_deconvolution(self.f_noisy, 5.7e1)
-        f = self.convolve(self.u_k)
-        plt.figure(figsize=(10, 6))
-
-        #plt.plot(x, self.get_true_u(x), label="True Signal", linestyle="--", alpha=0.7)
-        plt.plot(x, f, label="convolved Signal", linewidth=2)
-        plt.plot(x, self.u_k, label="true Signal ", linewidth=2)
-
-        plt.legend()
-        plt.title(title)
-        plt.xlabel('x')
-        plt.ylabel('Signal')
-        plt.grid(True)
-        plt.show()
-
-
-
-    def plot_l_curve(self, residual_norms, solution_norms):
-        alphas = self.alphas
-        plt.figure(figsize=(10, 6))
-        plt.loglog(residual_norms, solution_norms, marker='o')
-        for i, alpha in enumerate(alphas):
-            plt.text(residual_norms[i], solution_norms[i], f'{alpha:.1e}')
-        plt.xlabel('Residual norm ||f - k * u||')
-        plt.ylabel('Solution norm ||u||')
-        plt.title('L-curve for Tikhonov regularization')
-        plt.grid(True)
-        
-        
-        
-        plt.show()
+    
