@@ -22,6 +22,7 @@ class KernelSolver1D(MakeSignal):
         self.sigma = sigma
         self.alpha = alpha
         self.alphas = np.logspace(-7, -2, 30)
+        self.k_arr = np.arange(1,30, 1)
         self.u_k = self.get_true_u_k()
         self.f_noisy = self.add_noise(self.convolve(self.u_k, self.sigma), 1e-3)
 
@@ -56,15 +57,21 @@ class KernelSolver1D(MakeSignal):
         return u_recovered
 
 
-    
-    def deconcolution(self, f):
+    def truncated_svd(self, f, k, sigma):
+        K = self.kernel_matrix(sigma)
+        U, s, VT = svd(K)
+        
+        s2 = np.copy(s)
+        s2 = 1/s2
+        s2[k:] = 0
 
-        k = self.gaussian_kernel(self.x)
-        F = fft(f)
-        K = fft(k)
+        u_recovered = VT.T@np.diag(s2)@U.T@f
+
+        return u_recovered, s2[:k]
 
 
-    def compute_residual_and_solution_norm(self, f, alpha):
+
+    def compute_residual_and_solution_norm(self, f, alpha, k, svd_or_tik):
         """
         Compute the residual norm ||f - k * u|| and the solution norm ||u|| for the L-curve.
         
@@ -74,8 +81,13 @@ class KernelSolver1D(MakeSignal):
         :param regularization_param: Regularization parameter (lambda).
         :return: Tuple of residual norm and solution norm.
         """
-        u_recovered = self.tikhonov_deconvolution(self.f_noisy, alpha, self.sigma)
-        
+        if svd_or_tik:
+            u_recovered = self.tikhonov_deconvolution(self.f_noisy, alpha, self.sigma)
+            condition_num = None
+        else:
+            u_recovered, s = self.truncated_svd(self.f_noisy, k, self.sigma)
+            condition_num = np.nanmax(s[np.nonzero(s)])/np.nanmin(s[np.nonzero(s)])
+
         # Compute the residual ||f - k * u||
         residual = self.f_noisy - self.convolve(u_recovered, self.sigma)
         residual_norm = np.linalg.norm(residual)
@@ -83,9 +95,10 @@ class KernelSolver1D(MakeSignal):
         # Compute the solution norm ||u||
         solution_norm = np.linalg.norm(u_recovered)
         
-        return residual_norm, solution_norm
+        
+        return residual_norm, solution_norm, condition_num
 
-    def l_curve(self):
+    def l_curve(self, reginska_param, svd_or_tik):
         """
         Compute the L-curve for a range of regularization parameters (lambdas).
         
@@ -94,51 +107,63 @@ class KernelSolver1D(MakeSignal):
         :param lambdas: List of regularization parameters (lambda values).
         :return: List of residual norms and solution norms.
         """
-        alphas = self.alphas        
+        alphas = self.alphas
+        k_arr = self.k_arr       
         residual_norms = []
         solution_norms = []
         
-        for alpha in alphas:
-            residual_norm, solution_norm = self.compute_residual_and_solution_norm(self.f_noisy, alpha)
-            residual_norms.append(residual_norm)
-            solution_norms.append(solution_norm)
         
-        return residual_norms, solution_norms
+        if svd_or_tik:
+            for alpha in alphas:
+                residual_norm, solution_norm, _ = self.compute_residual_and_solution_norm(self.f_noisy, alpha, None, svd_or_tik)
+                residual_norms.append(residual_norm)
+                solution_norms.append(solution_norm)
+        
+            residual_norms = np.array(residual_norms)
+            solution_norms = np.array(solution_norms)
+            
+            reginska_optimal = alphas[np.argmin(residual_norms * solution_norms**reginska_param)]
 
-    def reginska_method(self, f, signal_length, regularization_param):
-        lambdas = self.lambdas
+            diff = abs(solution_norms[1:]-solution_norms[:-1])
+            
+            quasi_optimal = alphas[np.argmin(diff)]
+        
+        else:
+            for k in k_arr:
+                residual_norm, solution_norm, _ = self.compute_residual_and_solution_norm(self.f_noisy, None, k, svd_or_tik)
+                residual_norms.append(residual_norm)
+                solution_norms.append(solution_norm)
+        
+            residual_norms = np.array(residual_norms)
+            solution_norms = np.array(solution_norms)
+
+            reginska_optimal = k_arr[np.argmin(residual_norms * solution_norms**reginska_param)]
+
+            diff = abs(solution_norms[1:]-solution_norms[:-1])
+            quasi_optimal = k_arr[np.argmin(diff)]
+
+        return residual_norms, solution_norms, reginska_optimal, quasi_optimal
+
+    def l_curve_cond(self):
         """
-        Apply Reginska's method to find the optimal regularization parameter.
+        Compute the L-curve for a range of regularization parameters (lambdas).
         
         :param f: The observed signal.
         :param signal_length: Length of the original signal.
         :param lambdas: List of regularization parameters (lambda values).
-        :return: Tuple of optimal lambda, residual norms, solution norms.
+        :return: List of residual norms and solution norms.
         """
         residual_norms = []
-        solution_norms = []
+        condition_numbers = []
+        k_arr = self.k_arr
         
-        for lambda_reg in lambdas:
-            residual_norm, solution_norm = self.compute_residual_and_solution_norm(f,self.kernel, signal_length, lambda_reg)
+        
+        for k in k_arr:
+            residual_norm, _ , cond_num = self.compute_residual_and_solution_norm(self.f_noisy, None, k, False)
             residual_norms.append(residual_norm)
-            solution_norms.append(solution_norm)
-        
-        # Convert residual_norms and solution_norms to arrays
-        residual_norms = np.array(residual_norms)
-        solution_norms = np.array(solution_norms)
-        
-        # Compute curvature of the L-curve
-        log_residuals = np.log(residual_norms)
-        log_solutions = np.log(solution_norms)
+            condition_numbers.append(cond_num)
+    
 
-        d1 = np.gradient(log_residuals)
-        d2 = np.gradient(log_solutions)
-        
-        curvature = np.abs(d1 * np.gradient(d2) - d2 * np.gradient(d1)) / (d1**2 + d2**2)**1.5
-        
-        # Find the lambda with maximum curvature (corner of the L-curve)
-        optimal_lambda = lambdas[np.argmax(curvature)]
-        
-        return optimal_lambda, residual_norms, solution_norms, curvature
+        return residual_norms, condition_numbers
 
     

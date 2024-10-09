@@ -14,7 +14,7 @@ class InverseLaplaceSolver1D(MakeSignal):
         self.grid_size = grid_size
         self.L = self.CreateLaplaceMatrix(grid_size)
         self.alphas = np.logspace(-7, 0, 30)
-        self.noisy_u = self.add_noise(self.get_true_u(self.x), noise_level=0)
+        self.noisy_u = self.add_noise(self.get_true_u(self.x), noise_level = 1e-3)
         self.alpha = alpha
 
     
@@ -22,9 +22,8 @@ class InverseLaplaceSolver1D(MakeSignal):
         h = 1/(grid_size-1)
         L = -2 * np.eye(grid_size) + np.eye(grid_size, k=1) + np.eye(grid_size, k=-1)
         L *= 1/h**2
+        
         return L
-
-
     
     
 
@@ -36,8 +35,7 @@ class InverseLaplaceSolver1D(MakeSignal):
         I = np.eye(grid_size)
         U, s, VT = svd(L, full_matrices=False)
 
-        f0 = np.zeros(grid_size)
-        f0[0], f0[-1] = -3, 3
+        u0 = np.zeros(grid_size)
 
         v = np.linalg.solve(L.T, self.noisy_u)
         
@@ -48,37 +46,24 @@ class InverseLaplaceSolver1D(MakeSignal):
     
   
 
-    def truncated_svd(self, u, k):
-        grid_size = len(u)
+    def truncated_svd(self, k):
+        grid_size = len(self.noisy_u)
         L = self.CreateLaplaceMatrix(grid_size)
         U, s, VT = svd(L, full_matrices=False)
-        U_k = U[:, -k:]
-        s_k = s[-k:]
-        VT_k = VT[:, -k:]
-        v = np.linalg.solve(L.T, u)
-        
-        
-        f = np.linalg.solve(U_k@np.diag(1/s_k**2)@U_k.T, v)
+        U_k = U[:, :k]
+        s_k = s[:k]
 
-        
-        return f
+        VT_k = VT[:k, :]
+
+        s2 = np.copy(s)
+        s2 = 1/s2
+        s2[k:] = 0
+        #f = np.linalg.solve(VT_k.T@np.diag(1/s_k)@U_k.T, self.noisy_u)
+        f = np.linalg.solve(VT@np.diag(s2)@U.T, self.noisy_u)
+        return f, np.linalg.solve(L, f)
    
 
-    def plot_tikhonov(self, alpha):
-        f_tik, u_recovered = self.tikhonov_regularization(alpha)
-        x = self.x
-        f_true = self.get_true_f(x)
-        plt.figure(figsize=(8, 6))
-        
-        plt.plot(x, f_tik, marker='o', color = 'r', label = 'Tikhonov')
-        plt.plot(x, f_true, marker='o', color = 'g', label = 'True')
-
-        plt.xlabel('Position')
-        plt.ylabel('Potential')
-        plt.title('Inverse Discrete Laplace Equation 1D Solution')
-        plt.grid(True)
-        plt.legend()
-        plt.show()
+    
 
     def plot_SVD(self, u_noise, x, k):
         f_SVD = self.truncated_svd(u_noise, k)
@@ -116,7 +101,7 @@ class InverseLaplaceSolver1D(MakeSignal):
     
         return residual_norm, solution_norm
 
-    def l_curve(self):
+    def l_curve(self, reginska_param):
         alphas = self.alphas        
         residual_norms = []
         solution_norms = []
@@ -125,5 +110,13 @@ class InverseLaplaceSolver1D(MakeSignal):
             residual_norm, solution_norm = self.compute_residual_and_solution_norm(alpha)
             residual_norms.append(residual_norm)
             solution_norms.append(solution_norm)
-        
-        return residual_norms, solution_norms
+
+        residual_norms = np.array(residual_norms)
+        solution_norms = np.array(solution_norms)
+
+        reginska_alpha = alphas[np.argmin(residual_norms * solution_norms**reginska_param)]
+
+        diff = abs(solution_norms[1:]-solution_norms[:-1])
+        quasi_optimal_aplha = alphas[np.argmin(diff)]
+
+        return residual_norms, solution_norms, reginska_alpha, quasi_optimal_aplha

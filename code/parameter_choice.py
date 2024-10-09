@@ -53,14 +53,16 @@ class ParameterChoice:
 
 class MakeSignal:
     def __init__(self, gridsize):
-        self.x = np.linspace(0,1,gridsize)
+        self.x = np.linspace(0,1, gridsize)
         self.gridsize = gridsize
 
     def __u(self, x):
+        u = (x**3 / 6) - (x**4 / 12) + (1/12)*x
         return 1/2*(2*x**3-3*x**2+x) 
 
     def __f(self, x):
-        return  6*x-3
+
+        return  6*x-3 #x * (1 - x)
 
     def __u_k(self):
 
@@ -78,27 +80,6 @@ class MakeSignal:
         """
         noisy_signal = signal + noise_level * np.random.randn(len(signal))* np.nanmax(abs(signal))
         return noisy_signal
-
-
-    def plot_noise(self, f_or_u):
-        x = self.x
-        if f_or_u == 'f':
-            func = self.__f(x)
-        elif f_or_u == 'u':
-            func = self.__u(x)
-        else:
-            print('invalid input')
-            return
-        
-        func_noise = self.add_noise(func)
-        
-        plt.figure(figsize=(8, 6))
-        plt.plot(x, func_noise, marker='o')
-        plt.xlabel('Position')
-        plt.ylabel('Potential')
-        plt.title('Input signal with noise')
-        plt.grid(True)
-        plt.show()
 
     def get_true_f(self, x):
         return self.__f(x)
