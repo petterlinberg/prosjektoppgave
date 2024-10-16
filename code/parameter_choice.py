@@ -57,12 +57,12 @@ class MakeSignal:
         self.gridsize = gridsize
 
     def __u(self, x):
-        u = (x**3 / 6) - (x**4 / 12) + (1/12)*x
-        return 1/2*(2*x**3-3*x**2+x) 
+        u = (x**3 / 6) - (x**4 / 12) - (1/12)*x
+        return u #1/2*(2*x**3-3*x**2+x) 
 
     def __f(self, x):
 
-        return  6*x-3 #x * (1 - x)
+        return  x * (1 - x) #6*x-3
 
     def __u_k(self):
 

@@ -13,9 +13,10 @@ class InverseLaplaceSolver1D(MakeSignal):
         super(InverseLaplaceSolver1D, self).__init__(grid_size)
         self.grid_size = grid_size
         self.L = self.CreateLaplaceMatrix(grid_size)
-        self.alphas = np.logspace(-7, 0, 30)
+        self.alphas = np.logspace(-8, -3, 30)
         self.noisy_u = self.add_noise(self.get_true_u(self.x), noise_level = 1e-3)
         self.alpha = alpha
+        self.k_arr = np.arange(1,30,1)
 
     
     def CreateLaplaceMatrix(self, grid_size):
@@ -50,38 +51,20 @@ class InverseLaplaceSolver1D(MakeSignal):
         grid_size = len(self.noisy_u)
         L = self.CreateLaplaceMatrix(grid_size)
         U, s, VT = svd(L, full_matrices=False)
-        U_k = U[:, :k]
-        s_k = s[:k]
+        U_k = U[:, -k:]
+        s_k = s[-k:]
 
-        VT_k = VT[:k, :]
+        VT_k = VT[-k:, :]
 
-        s2 = np.copy(s)
-        s2 = 1/s2
-        s2[k:] = 0
         #f = np.linalg.solve(VT_k.T@np.diag(1/s_k)@U_k.T, self.noisy_u)
-        f = np.linalg.solve(VT@np.diag(s2)@U.T, self.noisy_u)
-        return f, np.linalg.solve(L, f)
+        #f = np.linalg.solve(VT@np.diag(s2)@U.T, self.noisy_u)
+        f = U_k @ np.diag(s_k) @ VT_k @ self.noisy_u
+        return f, np.linalg.solve(L, f), s_k
    
 
     
 
-    def plot_SVD(self, u_noise, x, k):
-        f_SVD = self.truncated_svd(u_noise, k)
-        f_true = self.f(x)
-        plt.figure(figsize=(8, 6))
-        
-        plt.plot(x[1:-1], f_SVD[1:-1], marker='o', color = 'r', label = 'SVD')
-
-        plt.plot(x, f_true, marker='o', color = 'g', label = 'True')
-
-        plt.xlabel('Position')
-        plt.ylabel('Potential')
-        plt.title('Inverse Discrete Laplace Equation 1D Solution')
-        plt.grid(True)
-        plt.legend()
-        plt.show()
-
-    def compute_residual_and_solution_norm(self, alpha):
+    def compute_residual_and_solution_norm(self, alpha, k, svd_or_tik):
         """
         Compute the residual norm ||f - k * u|| and the solution norm ||u|| for the L-curve.
         
@@ -91,32 +74,88 @@ class InverseLaplaceSolver1D(MakeSignal):
         :param regularization_param: Regularization parameter (lambda).
         :return: Tuple of residual norm and solution norm.
         """
-        f_recovered , u_recovered= self.tikhonov_regularization(alpha)
-        # Compute the residual ||f - k * u||
-        residual = u_recovered - self.noisy_u
-        residual_norm = np.linalg.norm(residual)
-    
-        # Compute the solution norm ||u||
-        solution_norm = np.linalg.norm(u_recovered)
-    
-        return residual_norm, solution_norm
+        if svd_or_tik:
+            f, u = self.tikhonov_regularization(alpha)
+            condition_num = None
+        else:
+            f, u, s = self.truncated_svd(k)
+            condition_num = np.nanmax(s[np.nonzero(s)])/np.nanmin(s[np.nonzero(s)])
 
-    def l_curve(self, reginska_param):
-        alphas = self.alphas        
+        # Compute the residual ||f - k * u||
+        residual = np.linalg.solve(self.L, f) - self.noisy_u
+        residual_norm = np.linalg.norm(residual)
+        
+        # Compute the solution norm ||u||
+        solution_norm = np.linalg.norm(f)
+        
+        
+        return residual_norm, solution_norm, condition_num
+
+    def l_curve(self, reginska_param, svd_or_tik):
+        alphas = self.alphas
+        k_arr = self.k_arr       
         residual_norms = []
         solution_norms = []
+        GCV_arr = []
         
-        for alpha in alphas:
-            residual_norm, solution_norm = self.compute_residual_and_solution_norm(alpha)
+        if svd_or_tik:
+            for alpha in alphas:
+                residual_norm, solution_norm, _ = self.compute_residual_and_solution_norm(alpha, None, svd_or_tik)
+                residual_norms.append(residual_norm)
+                solution_norms.append(solution_norm)
+        
+            residual_norms = np.array(residual_norms)
+            solution_norms = np.array(solution_norms)
+            
+            reginska_optimal = alphas[np.argmin(residual_norms * solution_norms**reginska_param)]
+
+            diff = abs(solution_norms[1:]-solution_norms[:-1])
+            
+            quasi_optimal = alphas[np.argmin(diff)]
+
+            GCV_optimal = None
+        
+        else:
+            for k in k_arr:
+                residual_norm, solution_norm, _ = self.compute_residual_and_solution_norm(None, k, svd_or_tik)
+                residual_norms.append(residual_norm)
+                solution_norms.append(solution_norm)
+                GCV_arr.append(residual_norm**2/(self.grid_size-k))
+        
+            residual_norms = np.array(residual_norms)
+            solution_norms = np.array(solution_norms)
+            GCV_arr = np.array(GCV_arr)
+            
+            reginska_optimal = k_arr[np.argmin(residual_norms * solution_norms**reginska_param)]
+
+            GCV_optimal = k_arr[np.argmin(GCV_arr)]
+            
+            diff = abs(solution_norms[1:]-solution_norms[:-1])
+            quasi_optimal = k_arr[np.argmin(diff)]
+
+        return residual_norms, solution_norms, reginska_optimal, quasi_optimal, GCV_optimal
+
+
+    def l_curve_cond(self):
+        """
+        Compute the L-curve for a range of regularization parameters (lambdas).
+        
+        :param f: The observed signal.
+        :param signal_length: Length of the original signal.
+        :param lambdas: List of regularization parameters (lambda values).
+        :return: List of residual norms and solution norms.
+        """
+        residual_norms = []
+        condition_numbers = []
+        k_arr = self.k_arr
+        
+        
+        for k in k_arr:
+            residual_norm, _ , cond_num = self.compute_residual_and_solution_norm(None, k, False)
             residual_norms.append(residual_norm)
-            solution_norms.append(solution_norm)
+            condition_numbers.append(cond_num)
+    
 
-        residual_norms = np.array(residual_norms)
-        solution_norms = np.array(solution_norms)
+        return residual_norms, condition_numbers
 
-        reginska_alpha = alphas[np.argmin(residual_norms * solution_norms**reginska_param)]
-
-        diff = abs(solution_norms[1:]-solution_norms[:-1])
-        quasi_optimal_aplha = alphas[np.argmin(diff)]
-
-        return residual_norms, solution_norms, reginska_alpha, quasi_optimal_aplha
+    

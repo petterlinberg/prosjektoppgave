@@ -41,7 +41,7 @@ class PlotCanvasLaplace(FigureCanvas):
         if svd_or_tik:
             f_tik, u_recovered = solver.tikhonov_regularization(alpha)
         else:
-            f_tik, u_recovered = solver.truncated_svd(k)
+            f_tik, u_recovered, s = solver.truncated_svd(k)
 
         # Create two side-by-side subplots
         ax2, ax1 = self.fig.subplots(1, 2)  # 1 row, 2 columns
@@ -67,33 +67,78 @@ class PlotCanvasLaplace(FigureCanvas):
         # Redraw the canvas with the updated plot
         self.draw()
 
-    def plot_l_curve(self, solver, reginska_param):
+    def plot_l_curve(self, solver, reginska_param, svd_or_tik):
         """
-        Plot the L-curve for Tikhonov regularization.
+        Use the solver's L-curve plot method to display L-curve in the canvas.
         """
-        # Clear the figure
-        self.axes.clear()
+        self.fig.clear()  # Clear previous plot
 
-        # Get the residual and solution norms
-        residual_norms, solution_norms, reginska_alpha, quasi_optimal_alpha = solver.l_curve(reginska_param)
+        ax = self.fig.add_subplot(111)  # Add a new axes for the L-curve
 
-        # Create the plot
+        residual_norms, solution_norms, reginska_alpha, quasi_optimal_alpha, GCV_optimal = solver.l_curve(reginska_param, svd_or_tik)
+        # Plot the L-curve directly on the FigureCanvas axes
+        ax.loglog(residual_norms, solution_norms, marker='o')
         
-        self.axes.loglog(residual_norms, solution_norms, marker='o')
-        for i, alpha in enumerate(solver.alphas):
-            if alpha == reginska_alpha:
-                self.axes.loglog(residual_norms[i], solution_norms[i], color = 'r', marker = 'x', label = 'Reginska optimal', mew=3, ms=8)
-            if alpha == quasi_optimal_alpha:
-                self.axes.loglog(residual_norms[i], solution_norms[i], color = 'g', marker = 'x', label = 'Quasi optimal', mew=3, ms=8)
-            self.axes.text(residual_norms[i], solution_norms[i], f'{alpha:.1e}')
+        if svd_or_tik:
+            ax.set_title("L-curve for Tikhonov regularization")
+            alphas = solver.alphas
+            for i, alpha in enumerate(alphas):
+                if alpha == reginska_alpha and alpha ==quasi_optimal_alpha:
+                    ax.text(residual_norms[i], solution_norms[i], f'{alpha:.1e} (Reginska and quasi optimal coincide)')
+                else:
+                    ax.text(residual_norms[i], solution_norms[i], f'{alpha:.1e}')
+                if alpha == reginska_alpha:
+                    ax.loglog(residual_norms[i], solution_norms[i], color='r', marker='x', label='Reginska optimal', mew=3, ms=8)
+                if alpha == quasi_optimal_alpha:
+                    ax.loglog(residual_norms[i], solution_norms[i], color='g', marker='x', label='Quasi optimal', mew=3, ms=8)
+                
+        else:
+            ax.set_title("L-curve for SVD regularization")
+            k_arr = solver.k_arr
 
-        self.axes.set_title("L-curve for Tikhonov regularization")
-        self.axes.set_xlabel("Residual norm $||L^{-1}f - u||$")
-        self.axes.set_ylabel("Solution norm ||f||")
-        self.axes.grid(True)
+            for i, k in enumerate(k_arr):
+                if k == reginska_alpha and k ==quasi_optimal_alpha:
+                    ax.text(residual_norms[i], solution_norms[i], f'{k} (Reginska and quasi optimal coincide)')
+                if k == reginska_alpha and k ==GCV_optimal:
+                    ax.text(residual_norms[i], solution_norms[i], f'{k} (Reginska and GCV optimal coincide)')
+                if k == GCV_optimal and k ==quasi_optimal_alpha:
+                    ax.text(residual_norms[i], solution_norms[i], f'{k} (GCV and quasi optimal coincide)')
 
-        # Redraw the canvas with the updated plot
+                ax.text(residual_norms[i], solution_norms[i], f'{k}')
+                if k == reginska_alpha:
+                    ax.loglog(residual_norms[i], solution_norms[i], color='r', marker='x', label='Reginska optimal', mew=3, ms=8)
+                if k == quasi_optimal_alpha:
+                    ax.loglog(residual_norms[i], solution_norms[i], color='g', marker='x', label='Quasi optimal', mew=3, ms=8)
+                if k == GCV_optimal:
+                    ax.loglog(residual_norms[i], solution_norms[i], color='y', marker='x', label='GCV optimal', mew=3, ms=8)
+        ax.set_xlabel('||$L^{-1}$f - u||')
+        ax.set_ylabel('||f||')
+        ax.legend()
+
+    def plot_l_curve_cond(self, solver):
+        """
+        Use the solver's L-curve plot method to display L-curve with condition numbers in the canvas.
+        """
+        self.fig.clear()  # Clear previous plot
+
+        ax = self.fig.add_subplot(111)  # Add a new axes for the L-curve condition
+
+        residual_norms, condition_numbers = solver.l_curve_cond()
+        
+        # Plot the L-curve condition numbers
+        ax.loglog(condition_numbers, residual_norms, marker='o')
+
+        k_arr = solver.k_arr
+        for i, k in enumerate(k_arr):
+            ax.text(condition_numbers[i], residual_norms[i], f'{k}')
+
+        ax.set_title("L-curve for SVD regularization")
+        ax.set_xlabel("Condition number")
+        ax.set_ylabel("Residual norm ||$L^{-1}$f - u||")
+        ax.grid(True)
+
         self.draw()
+
 
 class PlotCanvasKernel(FigureCanvas):
     def __init__(self, parent=None, width=15, height=12, dpi=100):
@@ -152,11 +197,12 @@ class PlotCanvasKernel(FigureCanvas):
 
         ax = self.fig.add_subplot(111)  # Add a new axes for the L-curve
 
-        residual_norms, solution_norms, reginska_alpha, quasi_optimal_alpha = solver.l_curve(reginska_param, svd_or_tik)
+        residual_norms, solution_norms, reginska_alpha, quasi_optimal_alpha, GCV_optimal = solver.l_curve(reginska_param, svd_or_tik)
         # Plot the L-curve directly on the FigureCanvas axes
         ax.loglog(residual_norms, solution_norms, marker='o')
         
         if svd_or_tik:
+            ax.set_title("L-curve for Tikhonov regularization")
             alphas = solver.alphas
             for i, alpha in enumerate(alphas):
                 if alpha == reginska_alpha and alpha ==quasi_optimal_alpha:
@@ -169,20 +215,30 @@ class PlotCanvasKernel(FigureCanvas):
                     ax.loglog(residual_norms[i], solution_norms[i], color='g', marker='x', label='Quasi optimal', mew=3, ms=8)
                 
         else:
+            ax.set_title("L-curve for SVD regularization")
             k_arr = solver.k_arr
-            print(quasi_optimal_alpha, reginska_alpha)
+
             for i, k in enumerate(k_arr):
+
                 if k == reginska_alpha and k ==quasi_optimal_alpha:
                     ax.text(residual_norms[i], solution_norms[i], f'{k} (Reginska and quasi optimal coincide)')
+                elif k == reginska_alpha and k ==GCV_optimal:
+                    ax.text(residual_norms[i], solution_norms[i], f'{k} (Reginska and GCV optimal coincide)')
+                elif k == GCV_optimal and k ==quasi_optimal_alpha:
+                    ax.text(residual_norms[i], solution_norms[i], f'{k} (GCV and quasi optimal coincide)')
                 else:
                     ax.text(residual_norms[i], solution_norms[i], f'{k}')
+
+                
                 if k == reginska_alpha:
                     ax.loglog(residual_norms[i], solution_norms[i], color='r', marker='x', label='Reginska optimal', mew=3, ms=8)
                 if k == quasi_optimal_alpha:
                     ax.loglog(residual_norms[i], solution_norms[i], color='g', marker='x', label='Quasi optimal', mew=3, ms=8)
+                if k == GCV_optimal:
+                    ax.loglog(residual_norms[i], solution_norms[i], color='y', marker='x', label='GCV optimal', mew=3, ms=8)
                 
 
-        ax.set_title("L-curve for Tikhonov regularization")
+            
         ax.set_xlabel("Residual norm ||k * u - f||")
         ax.set_ylabel("Solution norm ||u||")
         ax.grid(True)
@@ -409,9 +465,11 @@ class MainWindow(QWidget):
         # Create two sub-tabs for Laplace
         laplace_results_tab = QWidget()
         laplace_lcurve_tab = QWidget()
+        laplace_lcurve_gcv_tab = QWidget()  
 
         laplace_subtabs.addTab(laplace_results_tab, "Results")
         laplace_subtabs.addTab(laplace_lcurve_tab, "L-Curve")
+        laplace_subtabs.addTab(laplace_lcurve_gcv_tab, "L-Curve GCV")
 
         # Set layouts for laplace results and L-curve sub-tabs
         laplace_results_layout = QVBoxLayout()
@@ -427,6 +485,13 @@ class MainWindow(QWidget):
         self.toolbar4 = NavigationToolbar(self.plot_canvas4, self)
         laplace_lcurve_layout.addWidget(self.toolbar4)
         laplace_lcurve_tab.setLayout(laplace_lcurve_layout)
+
+        laplace_lcurve_gcv_layout = QVBoxLayout()  # Layout for GCV tab
+        self.plot_canvas6 = PlotCanvasLaplace(laplace_lcurve_gcv_tab, width=5, height=4)  # GCV plot
+        laplace_lcurve_gcv_layout.addWidget(self.plot_canvas6)
+        self.toolbar6 = NavigationToolbar(self.plot_canvas6, self)
+        laplace_lcurve_gcv_layout.addWidget(self.toolbar6)
+        laplace_lcurve_gcv_tab.setLayout(laplace_lcurve_gcv_layout)
 
         # Laplace controls (above the sub-tabs)
         controls_layout = QGridLayout()
@@ -518,7 +583,8 @@ class MainWindow(QWidget):
 
         # Initialize laplace plots
         self.plot_canvas3.plot_results(self.laplace_solver, self.alpha_laplace, self.k, self.SVD_or_tik_laplace)
-        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace)
+        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace, self.SVD_or_tik_laplace)
+        self.plot_canvas6.plot_l_curve_cond(self.laplace_solver)
 
     def update_grid_size_kernel(self):
         # Update the grid size for the kernel solver
@@ -537,7 +603,9 @@ class MainWindow(QWidget):
 
         # Update laplace plots
         self.plot_canvas3.plot_results(self.laplace_solver, self.alpha_laplace, self.k, self.SVD_or_tik_laplace)
-        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace)
+        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace, self.SVD_or_tik_laplace)
+        self.plot_canvas6.plot_l_curve_cond(self.laplace_solver)
+
 
     def update_k_laplace(self):
         # Update the grid size for the laplace solver
@@ -545,7 +613,7 @@ class MainWindow(QWidget):
 
         # Update laplace plots
         self.plot_canvas3.plot_results(self.laplace_solver, self.alpha_laplace, self.k, self.SVD_or_tik_laplace)
-        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace)
+        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace, self.SVD_or_tik_laplace)
 
     def update_k_kernel(self):
         # Update the grid size for the laplace solver
@@ -582,7 +650,9 @@ class MainWindow(QWidget):
         self.noise_level_laplace = self.noise_spinbox_laplace.value()
         self.laplace_solver.noisy_u = self.laplace_solver.add_noise(self.laplace_solver.get_true_u(self.laplace_solver.x), self.noise_level_laplace)
         self.plot_canvas3.plot_results(self.laplace_solver, self.alpha_laplace, self.k, self.SVD_or_tik_laplace)
-        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace)
+        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace, self.SVD_or_tik_laplace)
+        self.plot_canvas6.plot_l_curve_cond(self.laplace_solver)
+
 
     # Placeholder method for kernel method selection
     def kernel_method_changed(self):
@@ -594,6 +664,9 @@ class MainWindow(QWidget):
     def laplace_method_changed(self):
         self.SVD_or_tik_laplace = self.tikhonov_button_laplace.isChecked()
         self.plot_canvas3.plot_results(self.laplace_solver, self.alpha_laplace, self.k, self.SVD_or_tik_laplace)
+        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace, self.SVD_or_tik_laplace)
+        
+
 
     def update_reginska_kernel(self):
         self.reginska_param_kernel = self.reginska_spinbox_kernel.value()
@@ -601,7 +674,7 @@ class MainWindow(QWidget):
 
     def update_reginska_laplace(self):
         self.reginska_param_laplace = self.reginska_spinbox_laplace.value()
-        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace)
+        self.plot_canvas4.plot_l_curve(self.laplace_solver, self.reginska_param_laplace, self.SVD_or_tik_laplace)
 
 # Main code to run the application
 if __name__ == "__main__":

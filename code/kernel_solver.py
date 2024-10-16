@@ -35,12 +35,6 @@ class KernelSolver1D(MakeSignal):
     def convolve(self, signal, sigma):
         
         
-        N = len(signal)
-
-        
-        expanded_signal = np.pad(signal, N, mode = 'constant', constant_values = 0)
-        expanded_x = np.linspace(-1,2, N*3)
-        
         K = self.kernel_matrix(sigma)
         g =  K @ signal
         return g
@@ -52,7 +46,9 @@ class KernelSolver1D(MakeSignal):
         
         K = self.kernel_matrix(sigma)
         U, s, VT = svd(K)
-        u_recovered = VT.T@np.diag(s/(s**2+alpha))@U.T@f
+        S = s/(s**2+alpha)
+
+        u_recovered = VT.T@np.diag(S)@U.T@f
         
         return u_recovered
 
@@ -111,7 +107,7 @@ class KernelSolver1D(MakeSignal):
         k_arr = self.k_arr       
         residual_norms = []
         solution_norms = []
-        
+        GCV_arr = []
         
         if svd_or_tik:
             for alpha in alphas:
@@ -127,22 +123,28 @@ class KernelSolver1D(MakeSignal):
             diff = abs(solution_norms[1:]-solution_norms[:-1])
             
             quasi_optimal = alphas[np.argmin(diff)]
+
+            GCV_optimal = None
         
         else:
             for k in k_arr:
                 residual_norm, solution_norm, _ = self.compute_residual_and_solution_norm(self.f_noisy, None, k, svd_or_tik)
                 residual_norms.append(residual_norm)
                 solution_norms.append(solution_norm)
+                GCV_arr.append(residual_norm**2/(self.grid_size-k))
         
             residual_norms = np.array(residual_norms)
             solution_norms = np.array(solution_norms)
-
+            GCV_arr = np.array(GCV_arr)
+            
             reginska_optimal = k_arr[np.argmin(residual_norms * solution_norms**reginska_param)]
 
+            GCV_optimal = k_arr[np.argmin(GCV_arr)]
+            
             diff = abs(solution_norms[1:]-solution_norms[:-1])
             quasi_optimal = k_arr[np.argmin(diff)]
 
-        return residual_norms, solution_norms, reginska_optimal, quasi_optimal
+        return residual_norms, solution_norms, reginska_optimal, quasi_optimal, GCV_optimal
 
     def l_curve_cond(self):
         """
