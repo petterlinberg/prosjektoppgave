@@ -55,14 +55,15 @@ class MakeSignal:
     def __init__(self, gridsize):
         self.x = np.linspace(0,1, gridsize)
         self.gridsize = gridsize
-
+        self.random_vec = np.random.randn(gridsize)
+        self.random_vec/=np.linalg.norm(self.random_vec)
     def __u(self, x):
         u = (x**3 / 6) - (x**4 / 12) - (1/12)*x
-        return u #1/2*(2*x**3-3*x**2+x) 
+        return (x**4 / 12 - x**5 / 10 + x**6 / 30 - 1/60 * x)#(x**5 / 10) - (x**4 / 4) + (x**3 / 6) - (x / 60)# #1/2*(2*x**3-3*x**2+x) 
 
-    def __f(self, x):
-
-        return  x * (1 - x) #6*x-3
+    def __f(self):
+        x = self.x
+        return  x**2 * (1 - x)**2 #-x * (1 - x) * (2 * x - 1) # #6*x-3
 
     def __u_k(self):
 
@@ -78,13 +79,34 @@ class MakeSignal:
         :param noise_level: Standard deviation of the Gaussian noise.
         :return: Noisy signal.
         """
-        noisy_signal = signal + noise_level * np.random.randn(len(signal))* np.nanmax(abs(signal))
+        
+        noisy_signal = signal + noise_level * self.random_vec* np.linalg.norm(signal) ##np.random.randn(len(signal))* np.linalg.norm(signal)
         return noisy_signal
 
-    def get_true_f(self, x):
-        return self.__f(x)
+    def get_true_f(self):
+        return self.__f()
 
-    def get_true_u(self, x):
-        return self.__u(x)
+    def get_true_u(self):
+        return self.__u(self.x)
     def get_true_u_k(self):
         return self.__u_k()
+    def calculate_curvature(self, x, y):
+        """
+        Calculate the curvature of the L-curve at each point.
+        
+        :param x: Logarithm of solution norms.
+        :param y: Logarithm of residual norms.
+        :return: Array of curvature values.
+        """
+        # Compute first derivatives
+        dx = np.gradient(x)
+        dy = np.gradient(y)
+        
+        # Compute second derivatives
+        d2x = np.gradient(dx)
+        d2y = np.gradient(dy)
+        
+        # Compute curvature using the formula
+        curvature = np.abs(dx * d2y - dy * d2x) / (dx**2 + dy**2)**1.5
+        
+        return curvature
